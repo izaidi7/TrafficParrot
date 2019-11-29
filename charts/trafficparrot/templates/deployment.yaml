@@ -1,57 +1,45 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "trafficparrot.fullname" . }}
+  name: "{{.Chart.Name}}"
   labels:
-{{ include "trafficparrot.labels" . | indent 4 }}
+    app: "{{.Chart.Name}}-{{.Chart.Version}}-{{.Chart.AppVersion}}"
 spec:
-  replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      app.kubernetes.io/name: {{ include "trafficparrot.name" . }}
-      app.kubernetes.io/instance: {{ .Release.Name }}
+      app: "{{.Chart.Name}}-{{.Chart.Version}}-{{.Chart.AppVersion}}"
+  replicas: 1
+  strategy:
+    type: Recreate
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: {{ include "trafficparrot.name" . }}
-        app.kubernetes.io/instance: {{ .Release.Name }}
+        app: "{{.Chart.Name}}-{{.Chart.Version}}-{{.Chart.AppVersion}}"
     spec:
-    {{- with .Values.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-    {{- end }}
-      securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
-        - name: {{ .Chart.Name }}
-          securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
-          ports:
-            - name: http
-              containerPort: 80
-              protocol: TCP
-          livenessProbe:
-            httpGet:
-              path: /
-              port: http
-          readinessProbe:
-            httpGet:
-              path: /
-              port: http
-          resources:
-            {{- toYaml .Values.resources | nindent 12 }}
-      {{- with .Values.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-    {{- with .Values.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
-    {{- end }}
-    {{- with .Values.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-    {{- end }}
+      - name: "{{.Chart.Name}}"
+        image: "{{.Chart.Name}}:{{.Chart.AppVersion}}"
+        imagePullPolicy: Always
+        ports:
+        - name: api
+          containerPort: {{ .Values.ports.api }}
+        - name: grpc-non-tls
+          containerPort: {{ .Values.ports.grpc.nonTls }}
+        - name: grpc-tls
+          containerPort: {{ .Values.ports.grpc.tls }}
+        livenessProbe:
+          httpGet:
+            path: /
+            port: {{ .Values.ports.api }}
+          initialDelaySeconds: 20
+        readinessProbe:
+          exec:
+            command:
+            - cat
+            - virtualservice.started
+          initialDelaySeconds: 20
+        resources:
+          limits:
+            memory: 256Mi
+            cpu: 1.0
 
