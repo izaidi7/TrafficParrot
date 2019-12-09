@@ -54,6 +54,8 @@ For Debug resolver mock service we have all the proto files.
 4.  Follow the instructions to deploy **Traffic Parrot ** in k3d
     
       ```
+      docker login <docker username>
+	docker password
        export IMAGE=docker.io/prakashkb/trafficparrot:1.0.3       
         docker pull $IMAGE && k3d import-images $IMAGE
         cd charts
