@@ -1,0 +1,748 @@
+# Source: onprem-diagnostic/templates/ns.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: diagnostic
+
+---
+# Source: onprem-diagnostic/charts/redis/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: redis
+    chart: redis-9.1.10
+    heritage: Tiller
+    release: atlas
+  name: atlas-redis
+  namespace: diagnostic
+data:
+  redis.conf: |-
+    # User-supplied configuration:
+    # Enable AOF https://redis.io/topics/persistence#append-only-file
+    appendonly yes
+    # Disable RDB persistence, AOF persistence already enabled.
+    save ""
+  master.conf: |-
+    dir /data
+    rename-command FLUSHDB ""
+    rename-command FLUSHALL ""
+  replica.conf: |-
+    dir /data
+    slave-read-only yes
+    rename-command FLUSHDB ""
+    rename-command FLUSHALL ""
+---
+# Source: onprem-diagnostic/charts/redis/templates/health-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: redis
+    chart: redis-9.1.10
+    heritage: Tiller
+    release: atlas
+  name: atlas-redis-health
+  namespace: diagnostic
+data:
+  ping_readiness_local.sh: |-
+    response=$(
+      timeout -s 9 $1 \
+      redis-cli \
+        -h localhost \
+        -p $REDIS_PORT \
+        ping
+    )
+    if [ "$response" != "PONG" ]; then
+      echo "$response"
+      exit 1
+    fi
+  ping_liveness_local.sh: |-
+    response=$(
+      timeout -s 9 $1 \
+      redis-cli \
+        -h localhost \
+        -p $REDIS_PORT \
+        ping
+    )
+    if [ "$response" != "PONG" ] && [ "$response" != "LOADING Redis is loading the dataset in memory" ]; then
+      echo "$response"
+      exit 1
+    fi
+  ping_readiness_master.sh: |-
+    response=$(
+      timeout -s 9 $1 \
+      redis-cli \
+        -h $REDIS_MASTER_HOST \
+        -p $REDIS_MASTER_PORT_NUMBER \
+        ping
+    )
+    if [ "$response" != "PONG" ]; then
+      echo "$response"
+      exit 1
+    fi
+  ping_liveness_master.sh: |-
+    response=$(
+      timeout -s 9 $1 \
+      redis-cli \
+        -h $REDIS_MASTER_HOST \
+        -p $REDIS_MASTER_PORT_NUMBER \
+        ping
+    )
+    if [ "$response" != "PONG" ] && [ "$response" != "LOADING Redis is loading the dataset in memory" ]; then
+      echo "$response"
+      exit 1
+    fi
+  ping_readiness_local_and_master.sh: |-
+    script_dir="$(dirname "$0")"
+    exit_status=0
+    "$script_dir/ping_readiness_local.sh" $1 || exit_status=$?
+    "$script_dir/ping_readiness_master.sh" $1 || exit_status=$?
+    exit $exit_status
+  ping_liveness_local_and_master.sh: |-
+    script_dir="$(dirname "$0")"
+    exit_status=0
+    "$script_dir/ping_liveness_local.sh" $1 || exit_status=$?
+    "$script_dir/ping_liveness_master.sh" $1 || exit_status=$?
+    exit $exit_status
+---
+# Source: onprem-diagnostic/templates/command-configmap.yaml
+kind: ConfigMap
+metadata:
+  name: atlas-onprem-diagnostic-commands
+  namespace: diagnostic
+  labels:
+    app: atlas-onprem-diagnostic
+apiVersion: v1
+data:
+  commands-config.yaml: |-
+    - description: "describes the path a packet takes"
+      name: "traceroute"
+      userargs:
+       - target
+       - port
+      template: traceroute.tmpl
+    - description: "Traffic Capture"
+      name: "tcpdump"
+      userargs:
+       - source
+       - destination
+       - duration
+      template: tcpdump.tmpl
+    - description: "ntp status"
+      name: "ntp_test"
+      userargs: []
+      template: ntptest.tmpl
+    - description : "dns test"
+      name: "dns_test"
+      userargs:
+       - "domain_name"
+      template: dnstest.tmpl
+    - description: "display DHCP config file"
+      name: "dhcp_conf"
+      userargs: []
+      template: displayDNSConf.tmpl
+    - description: "display DNS config file"
+      name: "dns_conf"
+      userargs: []
+      template: displayDHCPConf.tmpl
+---
+# Source: onprem-diagnostic/templates/command-templates.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: atlas-onprem-diagnostic-command-templates
+  namespace: diagnostic
+  labels:
+    app: atlas-onprem-diagnostic
+data:
+  displayDHCPConf.tmpl: |
+    cmd: "cat"
+    args:
+      - "{{ if .FileName }}{{ .FileName }}{{else}}/home/keadist/etc/kea/kea-dhcp4.conf{{end}}"
+    workdir: {{ if .WorkDir }}{{.WorkDir}}{{end}}
+  displayDNSConf.tmpl: |
+    cmd: "cat"
+    args:
+      - "{{ if .FileName }}{{ .FileName }}{{else}}/var/named/named.conf{{end}}"
+    workdir: {{ if .WorkDir }}{{.WorkDir}}{{end}}
+  dnstest.tmpl: |
+    cmd: "dig"
+    args:
+      - "{{if .Addr }}@{{ .Addr }}{{end}}"
+      - "{{ .Domain }}"
+    workdir: {{ if .WorkDir }}{{.WorkDir}}{{end}}
+  ntptest.tmpl: |
+    cmd: "timedatectl"
+    args:
+      - "status"
+    workdir: {{ if .WorkDir }}{{.WorkDir}}{{end}}
+  tcpdump.tmpl: |+
+    cmd: "tcpdump"
+    args:
+      - "{{ if .Interface }}-m {{ .Interface }}{{end}}"
+      - "{{ if .Count }}-c {{ .Count }}{{end}}"
+      - "{{ if .Source }}src {{ .Source }}{{end}}"
+      - "{{ if and  .Source .Destination}}and{{end}}"
+      - "{{ if .Destination}}dst {{ .Destination }}{{end}}"
+      - "{{ if .Port }} port {{ .Port }}{{end}}"
+      - "-G {{ if .Duration }}{{ .Duration }}{{else}}300{{end}}"
+      - "-W 1"
+      - "-w -"
+    workdir: {{ if .WorkDir }}{{.WorkDir}}{{end}}
+  traceroute.tmpl: |
+    cmd: "traceroute"
+    args:
+      - "-m {{ if .MaxHops }}{{.MaxHops}}{{else}}4{{end}}"
+      - "{{ if .SourceIpAddr }}--source={{ .SourceIpAddr}}{{end}}"
+      - "--port={{ .DestinationPort }}"
+      - "{{ .DestinationHostName }}"
+    workdir: {{ if .WorkDir }}{{.WorkDir}}{{end}}
+---
+# Source: onprem-diagnostic/templates/config-map.yaml
+kind: ConfigMap
+metadata:
+  name: atlas-onprem-diagnostic-config
+  namespace: diagnostic
+  labels:
+    app: atlas-onprem-diagnostic
+apiVersion: v1
+data:
+  kubernetes-config.yaml: |-
+    metadata:
+      id: onprem-diagnostic
+    atlas.authz:
+      enable: false 
+      address: themis.authz.svc.cluster.local
+      port: 5555
+    atlas.audit:
+      enable: false
+      address: audit-logging.auditlog.svc.cluster.local
+      port: 9090
+    debugresolver:
+      enabled: true
+      address: 10.195.21.57:5552
+    app.id: diagnostic
+    storage:
+      address: atlas-redis-master-0.atlas-redis-headless.diagnostic.svc.cluster.local:6379
+      driver: redis
+---
+# Source: onprem-diagnostic/templates/sa.yaml
+kind: ServiceAccount
+apiVersion: v1
+metadata:
+  name: ibcto
+  namespace: diagnostic
+imagePullSecrets:
+  - name: infobloxctokey
+
+---
+# Source: onprem-diagnostic/charts/redis/templates/headless-svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: atlas-redis-headless
+  namespace: diagnostic
+  labels:
+    app: redis
+    chart: redis-9.1.10
+    release: "atlas"
+    heritage: "Tiller"
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - name: redis
+    port: 6379
+    targetPort: redis
+  selector:
+    app: redis
+    release: "atlas"
+
+---
+# Source: onprem-diagnostic/charts/redis/templates/redis-master-svc.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: atlas-redis-master
+  namespace: diagnostic
+  labels:
+    app: redis
+    chart: redis-9.1.10
+    release: "atlas"
+    heritage: "Tiller"
+spec:
+  type: ClusterIP
+  ports:
+  - name: redis
+    port: 6379
+    targetPort: redis
+  selector:
+    app: redis
+    release: "atlas"
+    role: master
+
+---
+# Source: onprem-diagnostic/charts/redis/templates/redis-slave-svc.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: atlas-redis-slave
+  namespace: diagnostic
+  labels:
+    app: redis
+    chart: redis-9.1.10
+    release: "atlas"
+    heritage: "Tiller"
+spec:
+  type: ClusterIP
+  ports:
+  - name: redis
+    port: 6379
+    targetPort: redis
+  selector:
+    app: redis
+    release: "atlas"
+    role: slave
+
+---
+# Source: onprem-diagnostic/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: atlas-onprem-diagnostic
+  namespace: diagnostic
+  labels:
+    app: atlas-onprem-diagnostic
+spec:
+  ports:
+    - name: http
+      port: 8080
+      protocol: TCP
+    - name: grpc
+      port: 9090
+      protocol: TCP
+  selector:
+    app: atlas-onprem-diagnostic
+
+---
+# Source: onprem-diagnostic/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: atlas-onprem-diagnostic
+  namespace: diagnostic
+  labels:
+    app: atlas-onprem-diagnostic
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: atlas-onprem-diagnostic
+  template:
+    metadata:
+      annotations:
+        checksum/config: b540166c7d60d4e406a2692596d93726cd89cbc168adc3f98da39c69f3d830ef
+      labels:
+        app: atlas-onprem-diagnostic
+    spec:
+      serviceAccountName: ibcto
+      containers:
+        - name: atlas-onprem-diagnostic
+          image: infobloxcto/atlas.onprem.diagnostic-server:v0.0.2-25-g7ceb18b-j55
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: CONFIG_SOURCE
+              value: "/etc/config"
+            - name: CONFIG_FILE
+              value: kubernetes-config
+            - name: CONFIG_COMMANDS_FILE
+              value: commands-config.yaml
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: grpc
+              containerPort: 9090
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+              scheme: HTTP
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8081
+              scheme: HTTP
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 10
+          volumeMounts:
+           - name: all-config-vol
+             mountPath: "/etc/config"
+          resources:
+            {}
+
+      volumes:
+       - name: all-config-vol
+         projected:
+           sources:
+            - configMap:
+                name:  atlas-onprem-diagnostic-config
+            - configMap:
+                name: atlas-onprem-diagnostic-commands
+            - configMap:
+                name: atlas-onprem-diagnostic-command-templates
+
+
+---
+# Source: onprem-diagnostic/charts/redis/templates/redis-master-statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: atlas-redis-master
+  namespace: diagnostic
+  labels:
+    app: redis
+    chart: redis-9.1.10
+    release: "atlas"
+    heritage: "Tiller"
+spec:
+  selector:
+    matchLabels:
+      release: "atlas"
+      role: master
+      app: redis
+  serviceName: atlas-redis-headless
+  template:
+    metadata:
+      labels:
+        release: "atlas"
+        chart: redis-9.1.10
+        role: master
+        app: redis
+
+      annotations:
+        checksum/health: 60bcc72464d9aee30da658f537b21770e8947c28eb39c8fb638d04aa30d0d12c
+        checksum/configmap: 361a6a1145d51480d6a12c34ed7629942b14dc79c4547ba65b355424ebae9534
+        checksum/secret: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    spec:
+      securityContext:
+        fsGroup: 1001
+      serviceAccountName: "default"
+      containers:
+      - name: atlas-redis
+        image: "docker.io/bitnami/redis:5.0.5-debian-9-r147"
+        imagePullPolicy: "IfNotPresent"
+        securityContext:
+          runAsUser: 1001
+        command:
+        - /bin/bash
+        - -c
+        - |
+          if [[ -n $REDIS_PASSWORD_FILE ]]; then
+            password_aux=`cat ${REDIS_PASSWORD_FILE}`
+            export REDIS_PASSWORD=$password_aux
+          fi
+          if [[ ! -f /opt/bitnami/redis/etc/master.conf ]];then
+            cp /opt/bitnami/redis/mounted-etc/master.conf /opt/bitnami/redis/etc/master.conf
+          fi
+          if [[ ! -f /opt/bitnami/redis/etc/redis.conf ]];then
+            cp /opt/bitnami/redis/mounted-etc/redis.conf /opt/bitnami/redis/etc/redis.conf
+          fi
+          ARGS=("--port" "${REDIS_PORT}")
+          ARGS+=("--protected-mode" "no")
+          ARGS+=("--include" "/opt/bitnami/redis/etc/redis.conf")
+          ARGS+=("--include" "/opt/bitnami/redis/etc/master.conf")
+          /run.sh ${ARGS[@]}
+        env:
+        - name: REDIS_REPLICATION_MODE
+          value: master
+        - name: ALLOW_EMPTY_PASSWORD
+          value: "yes"
+        - name: REDIS_PORT
+          value: "6379"
+        ports:
+        - name: redis
+          containerPort: 6379
+        livenessProbe:
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 5
+          exec:
+            command:
+            - sh
+            - -c
+            - /health/ping_liveness_local.sh 5
+        readinessProbe:
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 1
+          successThreshold: 1
+          failureThreshold: 5
+          exec:
+            command:
+            - sh
+            - -c
+            - /health/ping_readiness_local.sh 5
+        resources:
+          null
+        volumeMounts:
+        - name: health
+          mountPath: /health
+        - name: redis-data
+          mountPath: /data
+          subPath:
+        - name: config
+          mountPath: /opt/bitnami/redis/mounted-etc
+        - name: redis-tmp-conf
+          mountPath: /opt/bitnami/redis/etc/
+      volumes:
+      - name: health
+        configMap:
+          name: atlas-redis-health
+          defaultMode: 0755
+      - name: config
+        configMap:
+          name: atlas-redis
+      - name: redis-tmp-conf
+        emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: redis-data
+        labels:
+          app: "redis"
+          component: "master"
+          release: "atlas"
+          heritage: "Tiller"
+      spec:
+        accessModes:
+          - "ReadWriteOnce"
+        resources:
+          requests:
+            storage: "8Gi"
+  updateStrategy:
+    type: RollingUpdate
+
+---
+# Source: onprem-diagnostic/charts/redis/templates/redis-slave-statefulset.yaml
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: atlas-redis-slave
+  namespace: diagnostic
+  labels:
+    app: redis
+    chart: redis-9.1.10
+    release: "atlas"
+    heritage: "Tiller"
+spec:
+  replicas: 2
+  serviceName: atlas-redis-headless
+  selector:
+    matchLabels:
+        release: "atlas"
+        role: slave
+        app: redis
+  template:
+    metadata:
+      labels:
+        release: "atlas"
+        chart: redis-9.1.10
+        role: slave
+        app: redis
+      annotations:
+        checksum/health: 60bcc72464d9aee30da658f537b21770e8947c28eb39c8fb638d04aa30d0d12c
+        checksum/configmap: 361a6a1145d51480d6a12c34ed7629942b14dc79c4547ba65b355424ebae9534
+        checksum/secret: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    spec:
+      securityContext:
+        fsGroup: 1001
+      serviceAccountName: "default"
+      containers:
+      - name: atlas-redis
+        image: docker.io/bitnami/redis:5.0.5-debian-9-r147
+        imagePullPolicy: "IfNotPresent"
+        securityContext:
+          runAsUser: 1001
+        command:
+        - /bin/bash
+        - -c
+        - |
+          if [[ -n $REDIS_PASSWORD_FILE ]]; then
+            password_aux=`cat ${REDIS_PASSWORD_FILE}`
+            export REDIS_PASSWORD=$password_aux
+          fi
+          if [[ -n $REDIS_MASTER_PASSWORD_FILE ]]; then
+            password_aux=`cat ${REDIS_MASTER_PASSWORD_FILE}`
+            export REDIS_MASTER_PASSWORD=$password_aux
+          fi
+          if [[ ! -f /opt/bitnami/redis/etc/replica.conf ]];then
+            cp /opt/bitnami/redis/mounted-etc/replica.conf /opt/bitnami/redis/etc/replica.conf
+          fi
+          if [[ ! -f /opt/bitnami/redis/etc/redis.conf ]];then
+            cp /opt/bitnami/redis/mounted-etc/redis.conf /opt/bitnami/redis/etc/redis.conf
+          fi
+          ARGS=("--port" "${REDIS_PORT}")
+          ARGS+=("--slaveof" "${REDIS_MASTER_HOST}" "${REDIS_MASTER_PORT_NUMBER}")
+          ARGS+=("--protected-mode" "no")
+          ARGS+=("--include" "/opt/bitnami/redis/etc/redis.conf")
+          ARGS+=("--include" "/opt/bitnami/redis/etc/replica.conf")
+          /run.sh "${ARGS[@]}"
+        env:
+        - name: REDIS_REPLICATION_MODE
+          value: slave
+        - name: REDIS_MASTER_HOST
+          value: atlas-redis-master-0.atlas-redis-headless.diagnostic.svc.cluster.local
+        - name: REDIS_PORT
+          value: "6379"
+        - name: REDIS_MASTER_PORT_NUMBER
+          value: "6379"
+        - name: ALLOW_EMPTY_PASSWORD
+          value: "yes"
+        ports:
+        - name: redis
+          containerPort: 6379
+        livenessProbe:
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 5
+          exec:
+            command:
+            - sh
+            - -c
+            - /health/ping_liveness_local_and_master.sh 5
+        readinessProbe:
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 10
+          successThreshold: 1
+          failureThreshold: 5
+          exec:
+            command:
+            - sh
+            - -c
+            - /health/ping_readiness_local_and_master.sh 5
+        resources:
+          null
+
+        volumeMounts:
+        - name: health
+          mountPath: /health
+        - name: redis-data
+          mountPath: /data
+        - name: config
+          mountPath: /opt/bitnami/redis/mounted-etc
+        - name: redis-tmp-conf
+          mountPath: /opt/bitnami/redis/etc
+      volumes:
+      - name: health
+        configMap:
+          name: atlas-redis-health
+          defaultMode: 0755
+      - name: config
+        configMap:
+          name: atlas-redis
+      - name: sentinel-tmp-conf
+        emptyDir: {}
+      - name: redis-tmp-conf
+        emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: redis-data
+        labels:
+          app: "redis"
+          component: "slave"
+          release: "atlas"
+          heritage: "Tiller"
+      spec:
+        accessModes:
+          - "ReadWriteOnce"
+        resources:
+          requests:
+            storage: "8Gi"
+  updateStrategy:
+    type: RollingUpdate
+
+---
+# Source: onprem-diagnostic/templates/ingress.yaml
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: atlas-onprem-diagnostic-ingress
+  namespace: diagnostic
+  labels:
+    app: atlas-onprem-diagnostic
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/auth-url: http://identity-api.identity.svc.cluster.local/v2/session/verify
+    nginx.ingress.kubernetes.io/auth-response-headers: Authorization,Request-Id
+    nginx.ingress.kubernetes.io/limit-rps: "50"
+    nginx.ingress.kubernetes.io/service-upstream: "true"
+spec:
+  tls:
+    - secretName: csp-cert
+  rules:
+    - http:
+        paths:
+          - path: /atlas-onprem-diagnostic-service/v1/
+            backend:
+              serviceName: atlas-onprem-diagnostic
+              servicePort: http
+
+---
+# Source: onprem-diagnostic/templates/space.yaml
+
+# apiVersion: spacecontroller.infoblox-cto.github.com/v1alpha1
+# kind: Space
+# metadata:
+#   labels:
+#     app: onprem-diagnostic
+#   name: infobloxctokey
+#   namespace: diagnostic
+# spec:
+#   path: /image-pull/infobloxctokey
+#   secretName: infobloxctokey
+#   secrets:
+#     config: VAULT
+#   type: kubernetes.io/dockerconfigjson
+
+---
+# Source: onprem-diagnostic/charts/redis/templates/metrics-prometheus.yaml
+
+---
+# Source: onprem-diagnostic/charts/redis/templates/metrics-svc.yaml
+
+---
+# Source: onprem-diagnostic/charts/redis/templates/networkpolicy.yaml
+
+
+---
+# Source: onprem-diagnostic/charts/redis/templates/redis-role.yaml
+
+---
+# Source: onprem-diagnostic/charts/redis/templates/redis-rolebinding.yaml
+
+---
+# Source: onprem-diagnostic/charts/redis/templates/redis-serviceaccount.yaml
+
+---
+# Source: onprem-diagnostic/charts/redis/templates/redis-with-sentinel-svc.yaml
+
+
+---
+# Source: onprem-diagnostic/charts/redis/templates/secret.yaml
+

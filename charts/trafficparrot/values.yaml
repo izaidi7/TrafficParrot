@@ -6,7 +6,8 @@ replicaCount: 1
 
 image:
   repository: prakashkb
-  tag: stable
+  name: trafficparrot
+  tag: 1.0.2 
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []

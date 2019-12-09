@@ -1,0 +1,115 @@
+---
+# Source: trafficparrot/templates/serviceaccount.yaml
+#infoblox image pull secret
+apiVersion: v1
+data:
+  .dockerconfigjson: eyJhdXRocyI6CnsiaHR0cHM6Ly9pbmRleC5kb2NrZXIuaW8vdjEvIjoKewogICJ1c2VybmFtZSI6InByYWthc2hrYiIsCiAgInBhc3N3b3JkIjoiM2NjYmUtNGFhZi00ZWYzLThjOGMtNzY4YzU0NWFiNGJkIiwKICAiZW1haWwiOiJwa2JAaW5mb2Jsb3guY29tIiwKICAiYXV0aCI6ImNISmhhMkZ6YUd0aU9qTmpZMkpsTmpFNUxUUmhZV1l0TkdWbU15MDRZemhqTFRjMk9HTTFORFZoWWpSaVpBPT0iCiAgfQp9Cn0= 
+kind: Secret
+metadata:
+  name: infobloxpkbkey
+  namespace: default
+type: kubernetes.io/dockerconfigjson
+---
+
+#create service account for namespace
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: trafficparrot
+  namespace: default 
+imagePullSecrets:
+- name: infobloxpkbkey
+---
+
+
+
+---
+# Source: trafficparrot/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: "trafficparrot"
+spec:
+  selector:
+    app: "trafficparrot-1.0.3"
+  ports:
+  - name: api
+    port: 18080
+    targetPort: 18080
+  - name: grpc-non-tls
+    port: 5552
+    targetPort: 5552
+  - name: grpc-tls
+    port: 5551
+    targetPort: 5551
+
+---
+# Source: trafficparrot/templates/tests/test-connection.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "release-name-trafficparrot-test-connection"
+  labels:
+    app.kubernetes.io/name: trafficparrot
+    helm.sh/chart: trafficparrot-1.0.1
+    app.kubernetes.io/instance: release-name
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: Tiller
+  annotations:
+    "helm.sh/hook": test-success
+spec:
+  containers:
+    - name: wget
+      image: trafficparrot
+      command: ['wget']
+      args:  ['release-name-trafficparrot:5552']
+  restartPolicy: Never
+
+---
+# Source: trafficparrot/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "trafficparrot"
+  labels:
+    app: "trafficparrot-1.0.0"
+spec:
+  selector:
+    matchLabels:
+      app: "trafficparrot-1.0.0"
+  replicas: 1
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: "trafficparrot-1.0.0"
+    spec:
+      containers:
+      - name: "trafficparrot"
+        image: "prakashkb/trafficparrot:1.0.2"
+        imagePullPolicy: Always
+        ports:
+        - name: api
+          containerPort: 18080
+        - name: grpc-non-tls
+          containerPort: 5552
+        - name: grpc-tls
+          containerPort: 5551
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 18080
+          initialDelaySeconds: 20
+        readinessProbe:
+          exec:
+            command:
+            - cat
+            - virtualservice.started
+          initialDelaySeconds: 20
+        resources:
+          limits:
+            memory: 256Mi
+            cpu: 1.0
+
+

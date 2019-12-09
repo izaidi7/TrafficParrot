@@ -4,7 +4,7 @@ metadata:
   name: "{{.Chart.Name}}"
 spec:
   selector:
-    app: "{{.Chart.Name}}-{{.Chart.Version}}-{{.Chart.AppVersion}}"
+    app: "{{.Chart.Name}}-{{.Chart.AppVersion}}"
   ports:
   - name: api
     port: {{ .Values.ports.api }}

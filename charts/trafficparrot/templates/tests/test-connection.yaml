@@ -9,7 +9,7 @@ metadata:
 spec:
   containers:
     - name: wget
-      image: busybox
+      image: trafficparrot
       command: ['wget']
-      args:  ['{{ include "trafficparrot.fullname" . }}:{{ .Values.service.port }}']
+      args:  ['{{ include "trafficparrot.fullname" . }}:{{.Values.ports.grpc.nonTls}}']
   restartPolicy: Never

@@ -1,0 +1,107 @@
+syntax = "proto3";
+
+package adhoc;
+
+
+import "github.com/lyft/protoc-gen-validate/validate/validate.proto";
+import "google/api/annotations.proto";
+import "protoc-gen-swagger/options/annotations.proto";
+option go_package = "github.com/Infoblox-CTO/atlas.debug.resolver/api/adhoc;adhoc";
+option (grpc.gateway.protoc_gen_swagger.options.openapiv2_swagger) = {
+  info: {
+    version: "v1";
+  };
+  schemes: HTTP;
+  schemes: HTTPS;
+  consumes: "application/json";
+  produces: "application/json";
+  base_path: "/api/adhoc/v1/";
+};
+
+// Exec request body.
+message ExecRequest {
+  // Ophid is an on-premises host identifier.
+  string ophid = 1 [(validate.rules).string = {
+      min_len: 1,
+      max_len: 32,
+  }];
+  // Command specifies the command to execute.
+  Command command = 2;
+  // Stdin is a buffer to be passed to the command as standard input.
+  bytes stdin = 3;
+  // In is a container reference where the command will be executed in.
+  // If omitted, the command will be executed in the troubleshooting
+  // container.
+  ContainerReference in = 4;
+}
+
+// Command body.
+message Command {
+  // Cmd is the path of the command to execute.
+  // This is the only field that must be set to a non-zero value. If path
+  // is relative, it is evaluated relative to Workdir.
+  string cmd = 1;
+  // Args holds command line arguments, excluding the path of the command
+  // to run.
+  repeated string args = 2;
+  // Env specifies the environment of the process.
+  // Each entry is of the form "key=value".
+  // If Env is nil, the new process uses the current process's environment.
+  // If Env contains duplicate environment keys, only the last value in the
+  // slice for each duplicate key is used.
+  repeated string env = 3;
+  // Workdir specifies the working directory of the command.
+  // If Workdir is the empty string, Exec runs the command in the calling
+  // process's current directory.
+  string workdir = 4;
+}
+
+// Container reference body.
+message ContainerReference {
+  // Namespace containing a service.
+  // A project name in terms of docker-compose.
+  string namespace = 1;
+  // Service is the name of a service.
+  // A pod template in case of Kubernetes.
+  string service = 2;
+  // Index of the service (or pod) if there are multiple instances.
+  // 1-based and defaults to 1 when omitted.
+  int32 index = 3;
+  // Container is the name of a container in the service.
+  // If omitted, a container representing the service is assumed.
+  // If omitted and there is more than one container in the service, the call
+  // will fail.
+  // If Service is omitted, represents the name of a container running on the
+  // on-premises host.
+  string container = 4;
+}
+
+// Exec response body.
+message ExecResponse {
+  enum Stream {
+    STDOUT = 0;
+    STDERR = 1;
+  }
+  // Stream defines which stream the message belongs to.
+  Stream stream = 1;
+  // Buffer is the body of the message.
+  bytes buffer = 2;
+}
+
+service CommandService {
+  // Start specified command and wait for it to complete.
+  // Returns standard output and standard error streams multiplexed into
+  // single gRPC stream.
+  // If the command doesn't complete successfully an exit code is returned
+  // either via gRPC metadata or other mechanism like Atlas App Toolkit.
+  // References: 
+  //   https://groups.google.com/forum/#!msg/grpc-io/X_bUx3T8S7s/x38FU429CgAJ
+  //   https://github.com/infobloxopen/atlas-app-toolkit/tree/master/errors
+  rpc Exec (ExecRequest) returns (stream ExecResponse) {
+    option (google.api.http) = {
+      post: "/{ophid}/exec"
+      body: "*"
+    };
+  }
+}
+

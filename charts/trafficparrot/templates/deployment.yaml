@@ -3,22 +3,22 @@ kind: Deployment
 metadata:
   name: "{{.Chart.Name}}"
   labels:
-    app: "{{.Chart.Name}}-{{.Chart.Version}}-{{.Chart.AppVersion}}"
+    app: "{{.Chart.Name}}-{{.Chart.AppVersion}}"
 spec:
   selector:
     matchLabels:
-      app: "{{.Chart.Name}}-{{.Chart.Version}}-{{.Chart.AppVersion}}"
+      app: "{{.Chart.Name}}-{{.Chart.AppVersion}}"
   replicas: 1
   strategy:
     type: Recreate
   template:
     metadata:
       labels:
-        app: "{{.Chart.Name}}-{{.Chart.Version}}-{{.Chart.AppVersion}}"
+        app: "{{.Chart.Name}}-{{.Chart.AppVersion}}"
     spec:
       containers:
       - name: "{{.Chart.Name}}"
-        image: "{{.Chart.Name}}:{{.Chart.AppVersion}}"
+        image: "{{ .Values.image.repository }}/{{ .Values.image.name }}:{{ .Values.image.tag }}"
         imagePullPolicy: Always
         ports:
         - name: api

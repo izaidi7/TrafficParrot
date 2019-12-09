@@ -7,7 +7,6 @@ RUN test $ACCEPT_LICENSE = true
 
 # Extract the Traffic Parrot release file into /opt/trafficparrot
 WORKDIR /opt
-
 ADD $TRAFFIC_PARROT_ZIP trafficparrot.zip
 RUN apt-get update && apt-get install unzip -y && unzip trafficparrot.zip && rm trafficparrot.zip && mv trafficparrot-*-jre-* trafficparrot
 
@@ -20,13 +19,21 @@ RUN chgrp -R 0 /opt/trafficparrot && chmod -R g=u /opt/trafficparrot
 # You can override properties that appear in trafficparrot.properties here as key=value arguments
 WORKDIR /opt/trafficparrot
 
+RUN chmod +x /opt/trafficparrot/start-foreground.sh
+
 # Persistent volume will be mounted on /opt/trafficparrot-files
-RUN mkdir /opt/trafficparrot-files
+RUN mkdir /opt/trafficparrot-files1
+
+RUN chgrp -R 0 /opt/trafficparrot-files1 && chmod -R g=u /opt/trafficparrot-files1
+
+ADD proto /opt/trafficparrot-files1/proto
+
+ADD grpc-mappings /opt/trafficparrot-files1/grpc-mappings
 
 CMD [ \
     "./start-foreground.sh", \
     "trafficparrot.gui.http.port=18080", \
     "trafficparrot.virtualservice.http.port=18081", \
     "trafficparrot.virtualservice.http.management.port=18083", \
-    "trafficparrot.virtualservice.trafficFilesRootUrl=file:/opt/trafficparrot-files" \
+    "trafficparrot.virtualservice.trafficFilesRootUrl=file:/opt/trafficparrot-files1" \
 ]
