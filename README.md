@@ -10,17 +10,19 @@ To experience Traffic Parrot locally follow these [instructions](https://traffic
 
 # Deploy deploy Debug Resolver mock service to k3d
 
-1.  Pre-requisite
+1.  Pre-requisites
     
     1.  ```
-        install docker
-	install kubectl
+        install docker (Create docker login, if you don't have one)
+        install kubectl
         install k3d
-		wget -q -O - https://raw.githubusercontent.com/rancher/k3d/master/install.sh | bash - this will install k3d in root and one default namespace created in root. to work pods in user's name space please follow the below
-		k3d delete       
+			wget -q -O - https://raw.githubusercontent.com/rancher/k3d/master/install.sh | bash
+			This step will install k3d under root and also default namespace created in root.
+			However to view the work pods in user's name space please follow the below steps
+			k3d delete       
         ```
-        Create docker login, if you don't have one
-2.  Follow the k3d instructions as below:
+        
+2.  k3d instructions to setup new cluster and name space:
     
     1.  ```
         k3d create \
@@ -36,23 +38,26 @@ To experience Traffic Parrot locally follow these [instructions](https://traffic
 		kubectl config get-clusters
 		kubectl get nodes 
         ```
- 3. From step3, we start on mock service setup. This is the one time setup required for mock service.
-    3a. Unzip the TrafficParrot.zip file
-    3b. For GRPC apis, the spec will be defined in proto files. So, to create mock service, please collect the list of .proto files from 	 dev team required for your service
-    3c. Typically, ALL the GRPC api based services will have main proto file. This will be main source for all the GRPC apis.
-	What could be the challenge here?
-	      Normally in the main proto, there will be other dependent import of proto files. like below 
+ 3. From step-3, we start on mock service setup. Please follow the below check list to get mock service running.
+   
+ - [ ] Unzip the TrafficParrot.zip file
+ - [ ]  For GRPC apis, the spec will be defined in proto files. So, to create mock service, please collect the list of .proto files from 	 dev team required for your service
+ - [ ] Typically, ALL the GRPC api based services will have main proto file. This will be main source for all the GRPC apis.
+ - [ ] What could be the challenge here?
+	      Normally in the main proto file, there might other dependent import of proto files. like below 
 	      ```
 		import "github.com/lyft/protoc-gen-validate/validate/validate.proto";
 		import "google/api/annotations.proto";
 		import "protoc-gen-swagger/options/annotations.proto";
 		```			
-    3d. So for mock service setup, we need to have all the proto files with same folder structure. once you have all the proto files, 		copy them to proto folder of traffic parrot
-    3e. Run the ./start.sh file in traffic parrot folder.
-    3f. Locad the hostname:8080 url in the browser, and your Traffic parrot is ready.
-    3g. Click on GRPC and select Add/edit option in the UI
-    3g. Now the time to refer HLD to know the request and responses of the GRPC mock service
-    3h. Based on proto files, you will be able to see the sample request of the service need to be mocked. example below. this is the   	request of DEBUG resolver
+	    So, to create  mock service setup, we need to have all the dependent proto files with same folder structure. 
+
+ - [ ] Once you have all the proto files, copy them to proto folder of traffic parrot
+ - [ ]  Run the ./start.sh file in traffic parrot folder.
+ - [ ] Locad the hostname:8080 url in the browser, and your Traffic parrot is ready.
+ - [ ]  Click on GRPC and select Add/edit option in the UI
+ - [ ] Now the time to refer HLD to know the request and responses of the GRPC mock service
+ - [ ] Based on proto files, you will be able to see the sample request of the service need to be mocked. example 	        below. this is the sample request of DEBUG resolver which we are mocking pilot project
     ```
     {
  	 "ophid": "",
@@ -71,33 +76,42 @@ To experience Traffic Parrot locally follow these [instructions](https://traffic
   	}
 	}
 	```
-    3i. Create the response based on the request. the response can be unary or stream response. based on the design of the service
-    3j. Create error usecases for all the possible GRPC error codes. While creating error usecases, keep one parameter mandaory in your 	request, based on the paramter create the error response. Example below
+ - [ ] Create the response based on the request. the response can be unary or stream response. based on the design of the service
+ - [ ] Create error use cases for all the possible GRPC error codes. While creating error use cases, keep one parameter mandatory in your 	request, based on the parameter create the error response. Example below
     
+        ````	
+        Request
+        {
+        "ophid": "N123450001"
+        "command": {
+        "cmd": "cat",
+        "args": ["/var/named/named.conf"],
+        "env": [],
+         "workdir": ""
+         },
+         "stdin": ""
+         }
+        Response:
+        Select different error code
+        Ex: Server Unavailable 
         ```
-	Request
-	{
-  "ophid": "N123450001",
-  "command": {
-    "cmd": "cat",
-    "args": ["/var/named/named.conf"],
-    "env": [],
-    "workdir": ""
-  },
-  "stdin": ""
-}
-4.  Follow the instructions to deploy **Traffic Parrot ** in k3d
+
+3. Once the request response creation completed, integrate the Traffic parrot end point with actual service. In our case, Diagnostic service is the one depends on the debug resolver mock service.
+4. Verify the sample request and responses
+5. Creation Docker Image 
+	- [ ] With the proto and mapping files, Create the zip file of Traffic parrot 
+	 - [ ] Create Docker Image and push to docker hub. (For pilot project, I have pushed this image to my private repo.
+6.  Follow the instructions to deploy **Traffic Parrot ** in k3d
     
       ```
       docker login <docker username>
 	docker password
        export IMAGE=docker.io/prakashkb/trafficparrot:1.0.3       
         docker pull $IMAGE && k3d import-images $IMAGE
-        cd charts
-        helm install trafficparrot
+        kubectl apply -f deploy/trafficparrot.yaml
        ```
         
-5.  Install  **Diagnostic service**  - This actual code of Diagnostic service which is SUT (service under test)
+8.  Install  **Diagnostic service**  - This actual code of Diagnostic service which is SUT (service under test)
     
     1.  ```
         # import once only
